@@ -33,6 +33,16 @@ const api = {
       return res.json();
     } catch (err) { return { error: err.message }; }
   },
+  updateBranch: async (token, id, data) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/branches/${id}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      return res.json();
+    } catch (err) { return { error: err.message }; }
+  },
   deleteBranch: async (token, id) => {
     try {
       const res = await fetch(`${API_BASE_URL}/branches/${id}`, {
@@ -124,6 +134,13 @@ const monthNames = [
   { value: '09', label: 'กันยายน' }, { value: '10', label: 'ตุลาคม' },
   { value: '11', label: 'พฤศจิกายน' }, { value: '12', label: 'ธันวาคม' },
 ];
+
+// สร้างรายการปี (ปีปัจจุบัน -2 ถึง +2)
+const currentYear = new Date().getFullYear();
+const yearOptions = [];
+for (let y = currentYear - 2; y <= currentYear + 2; y++) {
+  yearOptions.push(y.toString());
+}
 
 const processData = (branches) => {
   if (!Array.isArray(branches)) return [];
@@ -221,6 +238,7 @@ const DataEntryPage = ({ token, onDataChange }) => {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
   const [branchForm, setBranchForm] = useState({ name: '', target: '', color: '#3b82f6' });
+  const [editingBranch, setEditingBranch] = useState(null);
   const [employeeForm, setEmployeeForm] = useState({ branch_id: '', name: '' });
   const [salesForm, setSalesForm] = useState({ employee_id: '', sale_date: new Date().toISOString().split('T')[0], facebook: '', shopee: '', lazada: '' });
   const [expenseForm, setExpenseForm] = useState({ employee_id: '', expense_date: new Date().toISOString().split('T')[0], cost: '', ads: '', fees: '' });
@@ -245,6 +263,23 @@ const DataEntryPage = ({ token, onDataChange }) => {
     if (!result.error) {
       showMessage('✅ เพิ่มสาขาสำเร็จ!');
       setBranchForm({ name: '', target: '', color: '#3b82f6' });
+      loadData();
+      onDataChange();
+    } else { showMessage('❌ ' + result.error, true); }
+    setLoading(false);
+  };
+
+  const handleUpdateBranch = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    const result = await api.updateBranch(token, editingBranch.id, { 
+      name: editingBranch.name, 
+      target: parseFloat(editingBranch.target) || 0, 
+      color: editingBranch.color 
+    });
+    if (!result.error) {
+      showMessage('✅ แก้ไขสาขาสำเร็จ!');
+      setEditingBranch(null);
       loadData();
       onDataChange();
     } else { showMessage('❌ ' + result.error, true); }
@@ -409,31 +444,65 @@ const DataEntryPage = ({ token, onDataChange }) => {
       {activeForm === 'branch' && (
         <div className="entry-form">
           <h3>🏢 จัดการสาขา</h3>
-          <form onSubmit={handleAddBranch}>
-            <div className="form-group">
-              <label>🏷️ ชื่อสาขา</label>
-              <input type="text" value={branchForm.name} onChange={e => setBranchForm({...branchForm, name: e.target.value})} placeholder="เช่น สาขาสีลม" required />
+          
+          {/* Edit Branch Modal */}
+          {editingBranch && (
+            <div className="edit-modal">
+              <form onSubmit={handleUpdateBranch}>
+                <h4>✏️ แก้ไขสาขา</h4>
+                <div className="form-group">
+                  <label>🏷️ ชื่อสาขา</label>
+                  <input type="text" value={editingBranch.name} onChange={e => setEditingBranch({...editingBranch, name: e.target.value})} required />
+                </div>
+                <div className="form-group">
+                  <label>🎯 เป้าหมาย/เดือน (บาท)</label>
+                  <input type="number" min="0" value={editingBranch.target} onChange={e => setEditingBranch({...editingBranch, target: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>🎨 สี</label>
+                  <input type="color" value={editingBranch.color || '#3b82f6'} onChange={e => setEditingBranch({...editingBranch, color: e.target.value})} />
+                </div>
+                <div className="btn-row">
+                  <button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '💾 บันทึก'}</button>
+                  <button type="button" className="cancel-btn" onClick={() => setEditingBranch(null)}>❌ ยกเลิก</button>
+                </div>
+              </form>
             </div>
-            <div className="form-group">
-              <label>🎯 เป้าหมาย/เดือน (บาท)</label>
-              <input type="number" min="0" value={branchForm.target} onChange={e => setBranchForm({...branchForm, target: e.target.value})} placeholder="500000" />
-            </div>
-            <div className="form-group">
-              <label>🎨 สี</label>
-              <input type="color" value={branchForm.color} onChange={e => setBranchForm({...branchForm, color: e.target.value})} />
-            </div>
-            <button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '➕ เพิ่ม'}</button>
-          </form>
+          )}
+          
+          {/* Add Branch Form */}
+          {!editingBranch && (
+            <form onSubmit={handleAddBranch}>
+              <div className="form-group">
+                <label>🏷️ ชื่อสาขา</label>
+                <input type="text" value={branchForm.name} onChange={e => setBranchForm({...branchForm, name: e.target.value})} placeholder="เช่น สาขาสีลม" required />
+              </div>
+              <div className="form-group">
+                <label>🎯 เป้าหมาย/เดือน (บาท)</label>
+                <input type="number" min="0" value={branchForm.target} onChange={e => setBranchForm({...branchForm, target: e.target.value})} placeholder="500000" />
+              </div>
+              <div className="form-group">
+                <label>🎨 สี</label>
+                <input type="color" value={branchForm.color} onChange={e => setBranchForm({...branchForm, color: e.target.value})} />
+              </div>
+              <button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '➕ เพิ่ม'}</button>
+            </form>
+          )}
+
           {branches.length > 0 && (
             <div className="data-list">
               <h4>📋 สาขา ({branches.length})</h4>
               {branches.map(b => (
-                <div key={b.id} className="data-item">
-                  <span style={{display:'flex',alignItems:'center',gap:'8px'}}>
-                    <span style={{width:'12px',height:'12px',borderRadius:'3px',background:b.color}}></span>
-                    {b.name} <small>(เป้า: ฿{formatCurrency(b.target)})</small>
-                  </span>
-                  <button className="delete-btn" onClick={() => handleDeleteBranch(b.id, b.name)}>🗑️</button>
+                <div key={b.id} className="data-item branch-item">
+                  <div className="branch-info">
+                    <span style={{width:'12px',height:'12px',borderRadius:'3px',background:b.color,display:'inline-block',marginRight:'8px'}}></span>
+                    <span>{b.name}</span>
+                    <small style={{marginLeft:'8px'}}>(เป้า: ฿{formatCurrency(b.target)}/เดือน)</small>
+                  </div>
+                  <div className="branch-actions">
+                    <button className="edit-btn" onClick={() => setEditingBranch({...b})}>✏️</button>
+                    <button className="delete-btn" onClick={() => handleDeleteBranch(b.id, b.name)}>🗑️</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -502,8 +571,18 @@ export default function App() {
         </nav>
 
         <div className="filters">
-          <div className="filter"><span>📅 ปี:</span><select value={period.year} onChange={e => setPeriod({...period, year: e.target.value})}><option value="2024">2024</option><option value="2025">2025</option></select></div>
-          <div className="filter"><span>📆 เดือน:</span><select value={period.month} onChange={e => setPeriod({...period, month: e.target.value})}>{monthNames.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}</select></div>
+          <div className="filter">
+            <span>📅 ปี:</span>
+            <select value={period.year} onChange={e => setPeriod({...period, year: e.target.value})}>
+              {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div className="filter">
+            <span>📆 เดือน:</span>
+            <select value={period.month} onChange={e => setPeriod({...period, month: e.target.value})}>
+              {monthNames.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
           <button className="refresh-btn" onClick={loadDashboardData}>🔄 รีเฟรช</button>
         </div>
 
@@ -588,5 +667,10 @@ const styles = `
 .branch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.branch-card{background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.1);border-radius:14px;padding:16px;cursor:pointer;transition:all .2s}.branch-card:hover{transform:translateY(-2px);border-color:rgba(59,130,246,.3)}.branch-card.selected{border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6}.branch-header{display:flex;justify-content:space-between;margin-bottom:12px}.branch-name{font-family:'Kanit',sans-serif;font-size:14px;font-weight:500}.branch-emp{font-size:11px;color:#64748b}.status{padding:4px 10px;border-radius:20px;font-size:10px}.status.success{background:rgba(16,185,129,.15);color:#34d399}.status.warning{background:rgba(245,158,11,.15);color:#fbbf24}.status.danger{background:rgba(239,68,68,.15);color:#f87171}.progress{margin-bottom:12px}.progress-header{display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px;color:#94a3b8}.progress-bar{height:5px;background:rgba(148,163,184,.2);border-radius:3px;overflow:hidden}.progress-fill{height:100%;border-radius:3px}.mini-channels{display:flex;gap:6px;margin-bottom:10px}.mini-ch{flex:1;padding:8px 4px;border-radius:8px;text-align:center;font-size:10px;color:white}.mini-ch-value{font-family:'Kanit',sans-serif;font-size:11px;font-weight:500}.branch-expenses-row{display:flex;justify-content:space-around;font-size:11px;margin-bottom:10px;padding:8px;background:rgba(15,23,42,.5);border-radius:8px}.branch-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stat{text-align:center;padding:8px 4px;background:rgba(15,23,42,.5);border-radius:8px}.stat-label{font-size:9px;color:#64748b}.stat-value{font-family:'Kanit',sans-serif;font-size:12px;font-weight:500}.stat-value.pos{color:#34d399}.stat-value.neg{color:#f87171}
 .emp-section{background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.1);border-radius:14px;padding:18px;margin-top:20px;animation:slideUp .3s ease}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}.emp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.emp-header h3{font-family:'Kanit',sans-serif;font-size:16px;font-weight:500}.close-btn{width:28px;height:28px;border:none;background:rgba(148,163,184,.1);color:#94a3b8;border-radius:6px;cursor:pointer;font-size:16px}.close-btn:hover{background:rgba(239,68,68,.2);color:#f87171}.emp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.emp-card{background:rgba(15,23,42,.5);border-radius:10px;padding:14px}.emp-card-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}.emp-avatar{width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:white}.emp-name{font-weight:500;font-size:13px}.emp-rank{font-size:10px;color:#64748b}.rank-badge{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;margin-left:auto}.rank-1{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#1e293b}.rank-2{background:linear-gradient(135deg,#94a3b8,#64748b);color:#1e293b}.rank-3{background:linear-gradient(135deg,#a78bfa,#7c3aed);color:white}.rank-n{background:rgba(148,163,184,.2);color:#94a3b8}.emp-channels{display:flex;gap:4px;margin-bottom:8px}.emp-ch{flex:1;padding:6px;border-radius:6px;text-align:center;font-size:10px;color:white}.emp-expenses-row{display:flex;justify-content:space-around;font-size:11px;margin-bottom:10px}.emp-summary{display:flex;justify-content:space-between;padding-top:10px;border-top:1px solid rgba(148,163,184,.1);font-size:11px}.emp-summary div{text-align:center}.emp-summary span{display:block;color:#64748b;font-size:9px}.emp-summary strong{font-family:'Kanit',sans-serif}
 .data-entry{max-width:600px;margin:0 auto}.entry-tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}.entry-tab{padding:10px 16px;background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.2);border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer;transition:all .2s}.entry-tab:hover{background:rgba(59,130,246,.1)}.entry-tab.active{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;border-color:transparent}.entry-form{background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.1);border-radius:14px;padding:24px;margin-bottom:20px}.entry-form h3{font-family:'Kanit',sans-serif;font-size:18px;margin-bottom:20px}.message{padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;text-align:center}.message.success{background:rgba(16,185,129,.1);color:#34d399;border:1px solid rgba(16,185,129,.3)}.message.error{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.3)}
-.data-list{margin-top:24px;padding-top:20px;border-top:1px solid rgba(148,163,184,.1)}.data-list h4{font-family:'Kanit',sans-serif;font-size:14px;margin-bottom:12px;color:#94a3b8}.data-item{display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(15,23,42,.5);border-radius:8px;margin-bottom:8px;font-size:13px}.data-item small{color:#64748b}.delete-btn{padding:6px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:12px;cursor:pointer}.delete-btn:hover{background:rgba(239,68,68,.2)}
+.data-list{margin-top:24px;padding-top:20px;border-top:1px solid rgba(148,163,184,.1)}.data-list h4{font-family:'Kanit',sans-serif;font-size:14px;margin-bottom:12px;color:#94a3b8}.data-item{display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(15,23,42,.5);border-radius:8px;margin-bottom:8px;font-size:13px}.data-item small{color:#64748b}
+.branch-item{flex-wrap:wrap}.branch-info{display:flex;align-items:center;flex:1}.branch-actions{display:flex;gap:6px}
+.edit-btn{padding:6px 10px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:6px;color:#60a5fa;font-size:12px;cursor:pointer}.edit-btn:hover{background:rgba(59,130,246,.2)}
+.delete-btn{padding:6px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:12px;cursor:pointer}.delete-btn:hover{background:rgba(239,68,68,.2)}
+.edit-modal{background:rgba(15,23,42,.8);border:1px solid rgba(59,130,246,.3);border-radius:12px;padding:20px;margin-bottom:20px}.edit-modal h4{font-family:'Kanit',sans-serif;font-size:16px;margin-bottom:16px;color:#60a5fa}
+.btn-row{display:flex;gap:12px}.btn-row .submit-btn{flex:1}.cancel-btn{flex:1;padding:14px;background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.3);border-radius:10px;color:#94a3b8;font-family:'Sarabun',sans-serif;font-size:15px;cursor:pointer}.cancel-btn:hover{background:rgba(148,163,184,.2)}
 `;
