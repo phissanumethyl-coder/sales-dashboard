@@ -43,7 +43,7 @@ const initDatabase = async () => {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // Branches table (ไม่มี target แล้ว เพราะจะรวมจาก employees)
+  // Branches table
   db.run(`CREATE TABLE IF NOT EXISTS branches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -51,16 +51,27 @@ const initDatabase = async () => {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // Employees table พร้อมเป้าหมายแยกแต่ละช่องทาง
+  // Employees table
   db.run(`CREATE TABLE IF NOT EXISTS employees (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     branch_id INTEGER,
     name TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (branch_id) REFERENCES branches(id)
+  )`);
+
+  // Monthly Targets - เป้าหมายรายเดือนแยกแต่ละคน
+  db.run(`CREATE TABLE IF NOT EXISTS monthly_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER,
+    year INTEGER,
+    month INTEGER,
     target_facebook REAL DEFAULT 0,
     target_shopee REAL DEFAULT 0,
     target_lazada REAL DEFAULT 0,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (branch_id) REFERENCES branches(id)
+    FOREIGN KEY (employee_id) REFERENCES employees(id),
+    UNIQUE(employee_id, year, month)
   )`);
 
   // Sales table
@@ -140,7 +151,6 @@ const seedDatabase = () => {
   const hashedPassword = bcrypt.hashSync('admin123', 10);
   dbRun('INSERT INTO users (username, password, name, role) VALUES (?, ?, ?, ?)', ['admin', hashedPassword, 'ผู้ดูแลระบบ', 'admin']);
   console.log('✅ สร้าง admin user เรียบร้อย!');
-  console.log('📝 Login: admin / admin123');
 };
 
 const authenticateToken = (req, res, next) => {
@@ -155,8 +165,8 @@ const authenticateToken = (req, res, next) => {
 };
 
 // Routes
-app.get('/', (req, res) => res.json({ message: '🚀 Sales Dashboard API is running!', status: 'ok' }));
-app.get('/api', (req, res) => res.json({ message: '🚀 Sales Dashboard API is running!', status: 'ok' }));
+app.get('/', (req, res) => res.json({ message: '🚀 Sales Dashboard API v4', status: 'ok' }));
+app.get('/api', (req, res) => res.json({ message: '🚀 Sales Dashboard API v4', status: 'ok' }));
 
 // Auth
 app.post('/api/auth/login', (req, res) => {
@@ -187,6 +197,7 @@ app.delete('/api/branches/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
   dbRun('DELETE FROM sales WHERE employee_id IN (SELECT id FROM employees WHERE branch_id = ?)', [id]);
   dbRun('DELETE FROM expenses WHERE employee_id IN (SELECT id FROM employees WHERE branch_id = ?)', [id]);
+  dbRun('DELETE FROM monthly_targets WHERE employee_id IN (SELECT id FROM employees WHERE branch_id = ?)', [id]);
   dbRun('DELETE FROM employees WHERE branch_id = ?', [id]);
   dbRun('DELETE FROM branches WHERE id = ?', [id]);
   res.json({ success: true });
@@ -194,42 +205,36 @@ app.delete('/api/branches/:id', authenticateToken, (req, res) => {
 
 // Employees
 app.get('/api/employees', authenticateToken, (req, res) => {
-  const { branch } = req.query;
-  if (branch) return res.json(dbAll('SELECT e.*, b.name as branch_name FROM employees e JOIN branches b ON e.branch_id = b.id WHERE e.branch_id = ? ORDER BY e.id', [branch]));
-  res.json(dbAll('SELECT e.*, b.name as branch_name FROM employees e JOIN branches b ON e.branch_id = b.id ORDER BY e.id'));
+  const employees = dbAll('SELECT e.*, b.name as branch_name FROM employees e JOIN branches b ON e.branch_id = b.id ORDER BY e.id');
+  res.json(employees);
 });
 
 app.post('/api/employees', authenticateToken, (req, res) => {
-  const { branch_id, name, target_facebook, target_shopee, target_lazada } = req.body;
-  const result = dbRun(
-    'INSERT INTO employees (branch_id, name, target_facebook, target_shopee, target_lazada) VALUES (?, ?, ?, ?, ?)',
-    [branch_id, name, target_facebook || 0, target_shopee || 0, target_lazada || 0]
-  );
-  res.json({ id: result.lastID, branch_id, name, target_facebook, target_shopee, target_lazada });
+  const { branch_id, name } = req.body;
+  const result = dbRun('INSERT INTO employees (branch_id, name) VALUES (?, ?)', [branch_id, name]);
+  res.json({ id: result.lastID, branch_id, name });
 });
 
 app.put('/api/employees/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
-  const { name, target_facebook, target_shopee, target_lazada } = req.body;
-  dbRun(
-    'UPDATE employees SET name = ?, target_facebook = ?, target_shopee = ?, target_lazada = ? WHERE id = ?',
-    [name, target_facebook || 0, target_shopee || 0, target_lazada || 0, id]
-  );
-  res.json({ id, name, target_facebook, target_shopee, target_lazada });
+  const { name } = req.body;
+  dbRun('UPDATE employees SET name = ? WHERE id = ?', [name, id]);
+  res.json({ id, name });
 });
 
 app.delete('/api/employees/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
   dbRun('DELETE FROM sales WHERE employee_id = ?', [id]);
   dbRun('DELETE FROM expenses WHERE employee_id = ?', [id]);
+  dbRun('DELETE FROM monthly_targets WHERE employee_id = ?', [id]);
   dbRun('DELETE FROM employees WHERE id = ?', [id]);
   res.json({ success: true });
 });
 
-// Sales - บันทึกยอดขายรายเดือน
-app.get('/api/sales', authenticateToken, (req, res) => {
+// Monthly Targets - เป้าหมายรายเดือน
+app.get('/api/targets', authenticateToken, (req, res) => {
   const { employee_id, year, month } = req.query;
-  let sql = 'SELECT * FROM sales WHERE 1=1';
+  let sql = 'SELECT * FROM monthly_targets WHERE 1=1';
   const params = [];
   if (employee_id) { sql += ' AND employee_id = ?'; params.push(employee_id); }
   if (year) { sql += ' AND year = ?'; params.push(year); }
@@ -237,62 +242,58 @@ app.get('/api/sales', authenticateToken, (req, res) => {
   res.json(dbAll(sql, params));
 });
 
+app.post('/api/targets', authenticateToken, (req, res) => {
+  const { employee_id, year, month, target_facebook, target_shopee, target_lazada } = req.body;
+  
+  // Check if exists
+  const existing = dbGet('SELECT id FROM monthly_targets WHERE employee_id = ? AND year = ? AND month = ?', [employee_id, year, month]);
+  
+  if (existing) {
+    dbRun('UPDATE monthly_targets SET target_facebook = ?, target_shopee = ?, target_lazada = ? WHERE id = ?', 
+      [target_facebook || 0, target_shopee || 0, target_lazada || 0, existing.id]);
+    res.json({ id: existing.id, updated: true });
+  } else {
+    const result = dbRun('INSERT INTO monthly_targets (employee_id, year, month, target_facebook, target_shopee, target_lazada) VALUES (?, ?, ?, ?, ?, ?)',
+      [employee_id, year, month, target_facebook || 0, target_shopee || 0, target_lazada || 0]);
+    res.json({ id: result.lastID });
+  }
+});
+
+// Sales
 app.post('/api/sales', authenticateToken, (req, res) => {
   const { employee_id, channel, amount, year, month } = req.body;
   const sale_date = `${year}-${String(month).padStart(2, '0')}-01`;
   
-  // ตรวจสอบว่ามีข้อมูลเดือนนี้หรือยัง ถ้ามีให้ update
-  const existing = dbGet(
-    'SELECT id FROM sales WHERE employee_id = ? AND channel = ? AND year = ? AND month = ?',
-    [employee_id, channel, year, month]
-  );
+  const existing = dbGet('SELECT id FROM sales WHERE employee_id = ? AND channel = ? AND year = ? AND month = ?', [employee_id, channel, year, month]);
   
   if (existing) {
     dbRun('UPDATE sales SET amount = ? WHERE id = ?', [amount, existing.id]);
-    res.json({ id: existing.id, employee_id, channel, amount, year, month, updated: true });
+    res.json({ id: existing.id, updated: true });
   } else {
-    const result = dbRun(
-      'INSERT INTO sales (employee_id, channel, amount, sale_date, year, month) VALUES (?, ?, ?, ?, ?, ?)',
-      [employee_id, channel, amount, sale_date, year, month]
-    );
-    res.json({ id: result.lastID, employee_id, channel, amount, year, month });
+    const result = dbRun('INSERT INTO sales (employee_id, channel, amount, sale_date, year, month) VALUES (?, ?, ?, ?, ?, ?)',
+      [employee_id, channel, amount, sale_date, year, month]);
+    res.json({ id: result.lastID });
   }
 });
 
-// Expenses - บันทึกค่าใช้จ่ายรายเดือน
-app.get('/api/expenses', authenticateToken, (req, res) => {
-  const { employee_id, year, month } = req.query;
-  let sql = 'SELECT * FROM expenses WHERE 1=1';
-  const params = [];
-  if (employee_id) { sql += ' AND employee_id = ?'; params.push(employee_id); }
-  if (year) { sql += ' AND year = ?'; params.push(year); }
-  if (month) { sql += ' AND month = ?'; params.push(month); }
-  res.json(dbAll(sql, params));
-});
-
+// Expenses
 app.post('/api/expenses', authenticateToken, (req, res) => {
   const { employee_id, type, amount, year, month } = req.body;
   const expense_date = `${year}-${String(month).padStart(2, '0')}-01`;
   
-  // ตรวจสอบว่ามีข้อมูลเดือนนี้หรือยัง ถ้ามีให้ update
-  const existing = dbGet(
-    'SELECT id FROM expenses WHERE employee_id = ? AND type = ? AND year = ? AND month = ?',
-    [employee_id, type, year, month]
-  );
+  const existing = dbGet('SELECT id FROM expenses WHERE employee_id = ? AND type = ? AND year = ? AND month = ?', [employee_id, type, year, month]);
   
   if (existing) {
     dbRun('UPDATE expenses SET amount = ? WHERE id = ?', [amount, existing.id]);
-    res.json({ id: existing.id, employee_id, type, amount, year, month, updated: true });
+    res.json({ id: existing.id, updated: true });
   } else {
-    const result = dbRun(
-      'INSERT INTO expenses (employee_id, type, amount, expense_date, year, month) VALUES (?, ?, ?, ?, ?, ?)',
-      [employee_id, type, amount, expense_date, year, month]
-    );
-    res.json({ id: result.lastID, employee_id, type, amount, year, month });
+    const result = dbRun('INSERT INTO expenses (employee_id, type, amount, expense_date, year, month) VALUES (?, ?, ?, ?, ?, ?)',
+      [employee_id, type, amount, expense_date, year, month]);
+    res.json({ id: result.lastID });
   }
 });
 
-// Dashboard - แสดงข้อมูลรวม
+// Dashboard - Main data
 app.get('/api/dashboard', authenticateToken, (req, res) => {
   const { year = 2026, month = 2 } = req.query;
   const y = parseInt(year);
@@ -304,33 +305,29 @@ app.get('/api/dashboard', authenticateToken, (req, res) => {
     const employees = dbAll('SELECT * FROM employees WHERE branch_id = ? ORDER BY id', [branch.id]);
     
     const employeesWithData = employees.map(emp => {
-      // ดึงยอดขายของเดือนนี้
-      const salesData = dbAll(
-        'SELECT channel, SUM(amount) as total FROM sales WHERE employee_id = ? AND year = ? AND month = ? GROUP BY channel',
-        [emp.id, y, m]
-      );
+      // Get monthly target
+      const target = dbGet('SELECT * FROM monthly_targets WHERE employee_id = ? AND year = ? AND month = ?', [emp.id, y, m]) || {};
+      
+      // Get sales
+      const salesData = dbAll('SELECT channel, SUM(amount) as total FROM sales WHERE employee_id = ? AND year = ? AND month = ? GROUP BY channel', [emp.id, y, m]);
       const sales = { facebook: 0, shopee: 0, lazada: 0 };
       salesData.forEach(s => sales[s.channel] = s.total || 0);
       
-      // ดึงค่าใช้จ่ายของเดือนนี้
-      const expenseData = dbAll(
-        'SELECT type, SUM(amount) as total FROM expenses WHERE employee_id = ? AND year = ? AND month = ? GROUP BY type',
-        [emp.id, y, m]
-      );
+      // Get expenses
+      const expenseData = dbAll('SELECT type, SUM(amount) as total FROM expenses WHERE employee_id = ? AND year = ? AND month = ? GROUP BY type', [emp.id, y, m]);
       const expenses = { cost: 0, ads: 0, fees: 0 };
       expenseData.forEach(e => expenses[e.type] = e.total || 0);
       
-      // คำนวณ
       const totalSales = sales.facebook + sales.shopee + sales.lazada;
-      const totalTarget = (emp.target_facebook || 0) + (emp.target_shopee || 0) + (emp.target_lazada || 0);
+      const totalTarget = (target.target_facebook || 0) + (target.target_shopee || 0) + (target.target_lazada || 0);
       const totalExpenses = expenses.cost + expenses.ads + expenses.fees;
       
       return {
         ...emp,
         targets: {
-          facebook: emp.target_facebook || 0,
-          shopee: emp.target_shopee || 0,
-          lazada: emp.target_lazada || 0,
+          facebook: target.target_facebook || 0,
+          shopee: target.target_shopee || 0,
+          lazada: target.target_lazada || 0,
           total: totalTarget
         },
         sales,
@@ -338,10 +335,8 @@ app.get('/api/dashboard', authenticateToken, (req, res) => {
         totalSales,
         totalExpenses,
         netProfit: totalSales - totalExpenses,
-        // % เทียบกับเป้า
         performancePct: totalTarget > 0 ? ((totalSales / totalTarget) * 100).toFixed(1) : '0.0',
         diffFromTarget: totalSales - totalTarget,
-        // % ค่าใช้จ่ายต่อยอดขาย
         costPct: totalSales > 0 ? ((expenses.cost / totalSales) * 100).toFixed(1) : '0.0',
         adsPct: totalSales > 0 ? ((expenses.ads / totalSales) * 100).toFixed(1) : '0.0',
         feesPct: totalSales > 0 ? ((expenses.fees / totalSales) * 100).toFixed(1) : '0.0',
@@ -349,7 +344,6 @@ app.get('/api/dashboard', authenticateToken, (req, res) => {
       };
     });
 
-    // รวมข้อมูลสาขา
     const branchTotalSales = employeesWithData.reduce((sum, e) => sum + e.totalSales, 0);
     const branchTotalTarget = employeesWithData.reduce((sum, e) => sum + e.targets.total, 0);
     const branchTotalExpenses = employeesWithData.reduce((sum, e) => sum + e.totalExpenses, 0);
@@ -395,21 +389,64 @@ app.get('/api/dashboard', authenticateToken, (req, res) => {
   res.json(result);
 });
 
+// Dashboard - 12 months history
+app.get('/api/dashboard/history', authenticateToken, (req, res) => {
+  const { year = 2026, month = 2 } = req.query;
+  const y = parseInt(year);
+  const m = parseInt(month);
+  
+  const history = [];
+  
+  for (let i = 11; i >= 0; i--) {
+    let histYear = y;
+    let histMonth = m - i;
+    
+    while (histMonth <= 0) {
+      histMonth += 12;
+      histYear -= 1;
+    }
+    
+    const salesData = dbAll('SELECT channel, SUM(amount) as total FROM sales WHERE year = ? AND month = ? GROUP BY channel', [histYear, histMonth]);
+    const sales = { facebook: 0, shopee: 0, lazada: 0 };
+    salesData.forEach(s => sales[s.channel] = s.total || 0);
+    
+    const targetData = dbAll('SELECT SUM(target_facebook) as fb, SUM(target_shopee) as sp, SUM(target_lazada) as lz FROM monthly_targets WHERE year = ? AND month = ?', [histYear, histMonth]);
+    const targets = targetData[0] || {};
+    
+    const expenseData = dbAll('SELECT SUM(amount) as total FROM expenses WHERE year = ? AND month = ?', [histYear, histMonth]);
+    
+    const totalSales = sales.facebook + sales.shopee + sales.lazada;
+    const totalTarget = (targets.fb || 0) + (targets.sp || 0) + (targets.lz || 0);
+    const totalExpenses = expenseData[0]?.total || 0;
+    
+    history.push({
+      year: histYear,
+      month: histMonth,
+      sales,
+      totalSales,
+      totalTarget,
+      totalExpenses,
+      netProfit: totalSales - totalExpenses
+    });
+  }
+  
+  res.json(history);
+});
+
 const startServer = async () => {
   await initDatabase();
   app.listen(PORT, () => {
     console.log(`
 ╔═══════════════════════════════════════════════════╗
-║     🚀 Sales Dashboard API Server v3              ║
+║     🚀 Sales Dashboard API Server v4              ║
 ╠═══════════════════════════════════════════════════╣
 ║  Server: http://localhost:${PORT}                    ║
 ║  Login: admin / admin123                          ║
 ║                                                   ║
-║  ✨ Features:                                     ║
-║     - เป้าหมายรายพนักงาน (FB/Shopee/Lazada)       ║
-║     - เป้าสาขา = รวมเป้าพนักงาน                   ║
-║     - ค่าใช้จ่าย % ต่อยอดขาย                      ║
-║     - เปรียบเทียบ ขาด/เกิน เป้า                   ║
+║  ✨ New Features:                                 ║
+║     - เป้าหมายรายเดือน                            ║
+║     - กราฟ 12 เดือนย้อนหลัง                       ║
+║     - กราฟวงกลมช่องทาง                           ║
 ╚═══════════════════════════════════════════════════╝
     `);
   });
