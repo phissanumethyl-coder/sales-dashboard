@@ -1,7 +1,7 @@
 {
   "name": "sales-dashboard-api",
-  "version": "1.0.0",
-  "description": "Backend API สำหรับ Sales Dashboard",
+  "version": "4.0.0",
+  "description": "Sales Dashboard API with PostgreSQL",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,7 +10,7 @@
     "express": "^4.18.2",
     "cors": "^2.8.5",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "sql.js": "^1.10.2"
+    "jsonwebtoken": "^9.0.0",
+    "pg": "^8.11.0"
   }
 }
