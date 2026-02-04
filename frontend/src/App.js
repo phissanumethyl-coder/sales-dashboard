@@ -78,75 +78,350 @@ const LoginPage = ({ onLogin }) => {
   );
 };
 
+// ========== COMBINED DATA ENTRY - รวมทุกฟอร์มในหน้าเดียว ==========
 const DataEntryPage = ({ token, period, onDataChange }) => {
   const [branches, setBranches] = useState([]);
   const [employees, setEmployees] = useState([]);
-  const [activeForm, setActiveForm] = useState('target');
+  const [activeForm, setActiveForm] = useState('data'); // 'data' หรือ 'manage'
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(null);
+  
+  // Form states
+  const [selectedEmployee, setSelectedEmployee] = useState('');
+  const [formData, setFormData] = useState({
+    target_facebook: '', target_shopee: '', target_lazada: '',
+    sales_facebook: '', sales_shopee: '', sales_lazada: '',
+    expense_cost: '', expense_ads: '', expense_fees: ''
+  });
+  
+  // Management forms
   const [branchForm, setBranchForm] = useState({ name: '', color: '#3b82f6' });
   const [editingBranch, setEditingBranch] = useState(null);
   const [employeeForm, setEmployeeForm] = useState({ branch_id: '', name: '' });
   const [editingEmployee, setEditingEmployee] = useState(null);
-  const [targetForm, setTargetForm] = useState({ employee_id: '', target_facebook: '', target_shopee: '', target_lazada: '' });
-  const [salesForm, setSalesForm] = useState({ employee_id: '', facebook: '', shopee: '', lazada: '' });
-  const [expenseForm, setExpenseForm] = useState({ employee_id: '', cost: '', ads: '', fees: '' });
 
   useEffect(() => { loadData(); }, [token]);
-  const loadData = async () => { const [b, e] = await Promise.all([api.getBranches(token), api.getEmployees(token)]); setBranches(b); setEmployees(e); };
-  const showMessage = (msg, isError = false) => { setMessage({ text: msg, isError }); setTimeout(() => setMessage(null), 3000); };
-  const loadExistingTarget = async (empId) => {
-    if (!empId) return;
-    const existing = await api.getTargets(token, empId, period.year, period.month);
-    if (existing) { setTargetForm({ employee_id: empId, target_facebook: existing.target_facebook || '', target_shopee: existing.target_shopee || '', target_lazada: existing.target_lazada || '' }); }
-    else { setTargetForm({ employee_id: empId, target_facebook: '', target_shopee: '', target_lazada: '' }); }
+  
+  const loadData = async () => { 
+    const [b, e] = await Promise.all([api.getBranches(token), api.getEmployees(token)]); 
+    setBranches(b); 
+    setEmployees(e); 
+  };
+  
+  const showMessage = (msg, isError = false) => { 
+    setMessage({ text: msg, isError }); 
+    setTimeout(() => setMessage(null), 3000); 
   };
 
+  // โหลดข้อมูลเดิมเมื่อเลือกพนักงาน
+  const loadExistingData = async (empId) => {
+    if (!empId) {
+      setFormData({ target_facebook: '', target_shopee: '', target_lazada: '', sales_facebook: '', sales_shopee: '', sales_lazada: '', expense_cost: '', expense_ads: '', expense_fees: '' });
+      return;
+    }
+    
+    // โหลดเป้าหมาย
+    const target = await api.getTargets(token, empId, period.year, period.month);
+    
+    // โหลดข้อมูล dashboard สำหรับพนักงานนี้
+    const dashboardData = await api.getDashboard(token, period.year, period.month);
+    let empData = null;
+    for (const branch of dashboardData) {
+      const found = branch.employees?.find(e => e.id === parseInt(empId));
+      if (found) { empData = found; break; }
+    }
+    
+    setFormData({
+      target_facebook: target?.target_facebook || '',
+      target_shopee: target?.target_shopee || '',
+      target_lazada: target?.target_lazada || '',
+      sales_facebook: empData?.sales?.facebook || '',
+      sales_shopee: empData?.sales?.shopee || '',
+      sales_lazada: empData?.sales?.lazada || '',
+      expense_cost: empData?.expenses?.cost || '',
+      expense_ads: empData?.expenses?.ads || '',
+      expense_fees: empData?.expenses?.fees || ''
+    });
+  };
+
+  const handleEmployeeChange = (empId) => {
+    setSelectedEmployee(empId);
+    loadExistingData(empId);
+  };
+
+  // บันทึกทั้งหมดในครั้งเดียว
+  const handleSaveAll = async (e) => {
+    e.preventDefault();
+    if (!selectedEmployee) {
+      showMessage('❌ กรุณาเลือกพนักงาน', true);
+      return;
+    }
+    
+    setLoading(true);
+    const empId = parseInt(selectedEmployee);
+    
+    try {
+      // บันทึกเป้าหมาย
+      await api.setTarget(token, {
+        employee_id: empId,
+        year: period.year,
+        month: period.month,
+        target_facebook: parseFloat(formData.target_facebook) || 0,
+        target_shopee: parseFloat(formData.target_shopee) || 0,
+        target_lazada: parseFloat(formData.target_lazada) || 0,
+      });
+      
+      // บันทึกยอดขาย
+      for (const [ch, field] of [['facebook', 'sales_facebook'], ['shopee', 'sales_shopee'], ['lazada', 'sales_lazada']]) {
+        if (formData[field] !== '') {
+          await api.addSale(token, { employee_id: empId, channel: ch, amount: parseFloat(formData[field]) || 0, year: period.year, month: period.month });
+        }
+      }
+      
+      // บันทึกค่าใช้จ่าย
+      for (const [type, field] of [['cost', 'expense_cost'], ['ads', 'expense_ads'], ['fees', 'expense_fees']]) {
+        if (formData[field] !== '') {
+          await api.addExpense(token, { employee_id: empId, type, amount: parseFloat(formData[field]) || 0, year: period.year, month: period.month });
+        }
+      }
+      
+      showMessage('✅ บันทึกข้อมูลทั้งหมดสำเร็จ!');
+      onDataChange();
+    } catch (err) {
+      showMessage('❌ เกิดข้อผิดพลาด: ' + err.message, true);
+    }
+    
+    setLoading(false);
+  };
+
+  // Branch handlers
   const handleAddBranch = async (e) => { e.preventDefault(); setLoading(true); await api.addBranch(token, branchForm); showMessage('✅ เพิ่มสาขาสำเร็จ!'); setBranchForm({ name: '', color: '#3b82f6' }); loadData(); onDataChange(); setLoading(false); };
   const handleUpdateBranch = async (e) => { e.preventDefault(); setLoading(true); await api.updateBranch(token, editingBranch.id, editingBranch); showMessage('✅ แก้ไขสาขาสำเร็จ!'); setEditingBranch(null); loadData(); onDataChange(); setLoading(false); };
   const handleDeleteBranch = async (id, name) => { if (window.confirm(`ลบ "${name}"?`)) { await api.deleteBranch(token, id); showMessage('✅ ลบสาขาสำเร็จ!'); loadData(); onDataChange(); } };
+  
+  // Employee handlers
   const handleAddEmployee = async (e) => { e.preventDefault(); setLoading(true); await api.addEmployee(token, { branch_id: parseInt(employeeForm.branch_id), name: employeeForm.name }); showMessage('✅ เพิ่มพนักงานสำเร็จ!'); setEmployeeForm({ branch_id: '', name: '' }); loadData(); onDataChange(); setLoading(false); };
   const handleUpdateEmployee = async (e) => { e.preventDefault(); setLoading(true); await api.updateEmployee(token, editingEmployee.id, { name: editingEmployee.name }); showMessage('✅ แก้ไขพนักงานสำเร็จ!'); setEditingEmployee(null); loadData(); onDataChange(); setLoading(false); };
   const handleDeleteEmployee = async (id, name) => { if (window.confirm(`ลบ "${name}"?`)) { await api.deleteEmployee(token, id); showMessage('✅ ลบพนักงานสำเร็จ!'); loadData(); onDataChange(); } };
-  const handleSetTarget = async (e) => { e.preventDefault(); setLoading(true); await api.setTarget(token, { employee_id: parseInt(targetForm.employee_id), year: period.year, month: period.month, target_facebook: parseFloat(targetForm.target_facebook) || 0, target_shopee: parseFloat(targetForm.target_shopee) || 0, target_lazada: parseFloat(targetForm.target_lazada) || 0 }); showMessage('✅ ตั้งเป้าหมายสำเร็จ!'); onDataChange(); setLoading(false); };
-  const handleAddSales = async (e) => { e.preventDefault(); setLoading(true); for (const [ch, amt] of [['facebook', salesForm.facebook], ['shopee', salesForm.shopee], ['lazada', salesForm.lazada]]) { if (amt && parseFloat(amt) >= 0) { await api.addSale(token, { employee_id: parseInt(salesForm.employee_id), channel: ch, amount: parseFloat(amt), year: period.year, month: period.month }); } } showMessage('✅ บันทึกยอดขายสำเร็จ!'); setSalesForm({ ...salesForm, facebook: '', shopee: '', lazada: '' }); onDataChange(); setLoading(false); };
-  const handleAddExpenses = async (e) => { e.preventDefault(); setLoading(true); for (const [t, amt] of [['cost', expenseForm.cost], ['ads', expenseForm.ads], ['fees', expenseForm.fees]]) { if (amt && parseFloat(amt) >= 0) { await api.addExpense(token, { employee_id: parseInt(expenseForm.employee_id), type: t, amount: parseFloat(amt), year: period.year, month: period.month }); } } showMessage('✅ บันทึกค่าใช้จ่ายสำเร็จ!'); setExpenseForm({ ...expenseForm, cost: '', ads: '', fees: '' }); onDataChange(); setLoading(false); };
+
   const getMonthLabel = () => monthNames.find(m => m.value === period.month)?.label || '';
+  
+  // คำนวณยอดรวม
+  const totalTarget = (parseFloat(formData.target_facebook) || 0) + (parseFloat(formData.target_shopee) || 0) + (parseFloat(formData.target_lazada) || 0);
+  const totalSales = (parseFloat(formData.sales_facebook) || 0) + (parseFloat(formData.sales_shopee) || 0) + (parseFloat(formData.sales_lazada) || 0);
+  const totalExpenses = (parseFloat(formData.expense_cost) || 0) + (parseFloat(formData.expense_ads) || 0) + (parseFloat(formData.expense_fees) || 0);
+  const netProfit = totalSales - totalExpenses;
+  const performancePct = totalTarget > 0 ? ((totalSales / totalTarget) * 100).toFixed(1) : '0.0';
 
   return (
-    <div className="data-entry">
-      <div className="entry-tabs">{[['target', '🎯 ตั้งเป้า'], ['sales', '💰 ยอดขาย'], ['expenses', '📉 ค่าใช้จ่าย'], ['employee', '👤 พนักงาน'], ['branch', '🏢 สาขา']].map(([key, label]) => (<button key={key} className={`entry-tab ${activeForm === key ? 'active' : ''}`} onClick={() => setActiveForm(key)}>{label}</button>))}</div>
+    <div className="data-entry-combined">
+      <div className="entry-tabs">
+        <button className={`entry-tab ${activeForm === 'data' ? 'active' : ''}`} onClick={() => setActiveForm('data')}>📝 กรอกข้อมูล</button>
+        <button className={`entry-tab ${activeForm === 'manage' ? 'active' : ''}`} onClick={() => setActiveForm('manage')}>⚙️ จัดการสาขา/พนักงาน</button>
+      </div>
+      
       {message && <div className={`message ${message.isError ? 'error' : 'success'}`}>{message.text}</div>}
 
-      {activeForm === 'target' && (<form className="entry-form" onSubmit={handleSetTarget}><h3>🎯 ตั้งเป้าหมาย - {getMonthLabel()} {period.year}</h3><p style={{color:'#64748b',fontSize:'12px',marginBottom:'16px'}}>💡 ตั้งเป้าหมายแยกแต่ละเดือนได้</p>
-        {employees.length === 0 ? <div className="empty-state"><p>⚠️ กรุณาเพิ่มสาขาและพนักงานก่อน</p></div> : (<>
-          <div className="form-group"><label>👤 พนักงาน</label><select value={targetForm.employee_id} onChange={e => { setTargetForm({...targetForm, employee_id: e.target.value}); loadExistingTarget(e.target.value); }} required><option value="">-- เลือก --</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} ({emp.branch_name})</option>)}</select></div>
-          <div className="form-row"><div className="form-group"><label>📘 เป้า Facebook</label><input type="number" min="0" value={targetForm.target_facebook} onChange={e => setTargetForm({...targetForm, target_facebook: e.target.value})} placeholder="0" /></div><div className="form-group"><label>🛒 เป้า Shopee</label><input type="number" min="0" value={targetForm.target_shopee} onChange={e => setTargetForm({...targetForm, target_shopee: e.target.value})} placeholder="0" /></div><div className="form-group"><label>🛍️ เป้า Lazada</label><input type="number" min="0" value={targetForm.target_lazada} onChange={e => setTargetForm({...targetForm, target_lazada: e.target.value})} placeholder="0" /></div></div>
-          <div className="target-sum">เป้ารวม: ฿{formatCurrency((parseFloat(targetForm.target_facebook)||0)+(parseFloat(targetForm.target_shopee)||0)+(parseFloat(targetForm.target_lazada)||0))}</div>
-          <button type="submit" className="submit-btn" disabled={loading || !targetForm.employee_id}>{loading ? '⏳...' : '💾 บันทึกเป้าหมาย'}</button></>)}</form>)}
+      {/* ========== กรอกข้อมูล - ฟอร์มรวม ========== */}
+      {activeForm === 'data' && (
+        <div className="combined-form">
+          <div className="form-header">
+            <h3>📝 กรอกข้อมูล - {getMonthLabel()} {period.year}</h3>
+            <p>เลือกพนักงาน แล้วกรอกข้อมูลทั้งหมดในครั้งเดียว</p>
+          </div>
+          
+          {employees.length === 0 ? (
+            <div className="empty-state">
+              <p>⚠️ กรุณาเพิ่มสาขาและพนักงานก่อน</p>
+              <button className="link-btn" onClick={() => setActiveForm('manage')}>➕ เพิ่มสาขา/พนักงาน</button>
+            </div>
+          ) : (
+            <form onSubmit={handleSaveAll}>
+              {/* เลือกพนักงาน */}
+              <div className="employee-selector">
+                <label>👤 เลือกพนักงาน</label>
+                <select value={selectedEmployee} onChange={e => handleEmployeeChange(e.target.value)} required>
+                  <option value="">-- เลือกพนักงาน --</option>
+                  {branches.map(branch => (
+                    <optgroup key={branch.id} label={`🏢 ${branch.name}`}>
+                      {employees.filter(e => e.branch_id === branch.id).map(emp => (
+                        <option key={emp.id} value={emp.id}>{emp.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
 
-      {activeForm === 'sales' && (<form className="entry-form" onSubmit={handleAddSales}><h3>💰 บันทึกยอดขาย - {getMonthLabel()} {period.year}</h3>
-        {employees.length === 0 ? <div className="empty-state"><p>⚠️ กรุณาเพิ่มสาขาและพนักงานก่อน</p></div> : (<>
-          <div className="form-group"><label>👤 พนักงาน</label><select value={salesForm.employee_id} onChange={e => setSalesForm({...salesForm, employee_id: e.target.value})} required><option value="">-- เลือก --</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} ({emp.branch_name})</option>)}</select></div>
-          <div className="form-row"><div className="form-group"><label>📘 Facebook</label><input type="number" min="0" value={salesForm.facebook} onChange={e => setSalesForm({...salesForm, facebook: e.target.value})} placeholder="0" /></div><div className="form-group"><label>🛒 Shopee</label><input type="number" min="0" value={salesForm.shopee} onChange={e => setSalesForm({...salesForm, shopee: e.target.value})} placeholder="0" /></div><div className="form-group"><label>🛍️ Lazada</label><input type="number" min="0" value={salesForm.lazada} onChange={e => setSalesForm({...salesForm, lazada: e.target.value})} placeholder="0" /></div></div>
-          <button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '💾 บันทึก'}</button></>)}</form>)}
+              {selectedEmployee && (
+                <>
+                  {/* Section: เป้าหมาย */}
+                  <div className="form-section">
+                    <div className="section-header target">
+                      <span>🎯 เป้าหมายยอดขาย</span>
+                      <span className="section-total">รวม: ฿{formatCurrency(totalTarget)}</span>
+                    </div>
+                    <div className="form-row-3">
+                      <div className="form-group">
+                        <label style={{color: '#1877f2'}}>📘 Facebook</label>
+                        <input type="number" min="0" value={formData.target_facebook} onChange={e => setFormData({...formData, target_facebook: e.target.value})} placeholder="0" />
+                      </div>
+                      <div className="form-group">
+                        <label style={{color: '#ee4d2d'}}>🛒 Shopee</label>
+                        <input type="number" min="0" value={formData.target_shopee} onChange={e => setFormData({...formData, target_shopee: e.target.value})} placeholder="0" />
+                      </div>
+                      <div className="form-group">
+                        <label style={{color: '#0f146d'}}>🛍️ Lazada</label>
+                        <input type="number" min="0" value={formData.target_lazada} onChange={e => setFormData({...formData, target_lazada: e.target.value})} placeholder="0" />
+                      </div>
+                    </div>
+                  </div>
 
-      {activeForm === 'expenses' && (<form className="entry-form" onSubmit={handleAddExpenses}><h3>📉 บันทึกค่าใช้จ่าย - {getMonthLabel()} {period.year}</h3>
-        {employees.length === 0 ? <div className="empty-state"><p>⚠️ กรุณาเพิ่มสาขาและพนักงานก่อน</p></div> : (<>
-          <div className="form-group"><label>👤 พนักงาน</label><select value={expenseForm.employee_id} onChange={e => setExpenseForm({...expenseForm, employee_id: e.target.value})} required><option value="">-- เลือก --</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} ({emp.branch_name})</option>)}</select></div>
-          <div className="form-row"><div className="form-group"><label>📦 ต้นทุน</label><input type="number" min="0" value={expenseForm.cost} onChange={e => setExpenseForm({...expenseForm, cost: e.target.value})} placeholder="0" /></div><div className="form-group"><label>📢 ค่าโฆษณา</label><input type="number" min="0" value={expenseForm.ads} onChange={e => setExpenseForm({...expenseForm, ads: e.target.value})} placeholder="0" /></div><div className="form-group"><label>💳 ค่าธรรมเนียม</label><input type="number" min="0" value={expenseForm.fees} onChange={e => setExpenseForm({...expenseForm, fees: e.target.value})} placeholder="0" /></div></div>
-          <button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '💾 บันทึก'}</button></>)}</form>)}
+                  {/* Section: ยอดขายจริง */}
+                  <div className="form-section">
+                    <div className="section-header sales">
+                      <span>💰 ยอดขายจริง</span>
+                      <span className="section-total">รวม: ฿{formatCurrency(totalSales)}</span>
+                    </div>
+                    <div className="form-row-3">
+                      <div className="form-group">
+                        <label style={{color: '#1877f2'}}>📘 Facebook</label>
+                        <input type="number" min="0" value={formData.sales_facebook} onChange={e => setFormData({...formData, sales_facebook: e.target.value})} placeholder="0" />
+                      </div>
+                      <div className="form-group">
+                        <label style={{color: '#ee4d2d'}}>🛒 Shopee</label>
+                        <input type="number" min="0" value={formData.sales_shopee} onChange={e => setFormData({...formData, sales_shopee: e.target.value})} placeholder="0" />
+                      </div>
+                      <div className="form-group">
+                        <label style={{color: '#0f146d'}}>🛍️ Lazada</label>
+                        <input type="number" min="0" value={formData.sales_lazada} onChange={e => setFormData({...formData, sales_lazada: e.target.value})} placeholder="0" />
+                      </div>
+                    </div>
+                  </div>
 
-      {activeForm === 'employee' && (<div className="entry-form"><h3>👤 จัดการพนักงาน</h3>
-        {editingEmployee ? (<form onSubmit={handleUpdateEmployee} className="edit-modal"><h4>✏️ แก้ไขพนักงาน</h4><div className="form-group"><label>👤 ชื่อ</label><input type="text" value={editingEmployee.name} onChange={e => setEditingEmployee({...editingEmployee, name: e.target.value})} required /></div><div className="btn-row"><button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '💾 บันทึก'}</button><button type="button" className="cancel-btn" onClick={() => setEditingEmployee(null)}>❌ ยกเลิก</button></div></form>)
-        : branches.length === 0 ? (<div className="empty-state"><p>⚠️ กรุณาเพิ่มสาขาก่อน</p></div>)
-        : (<form onSubmit={handleAddEmployee}><div className="form-group"><label>🏢 สาขา</label><select value={employeeForm.branch_id} onChange={e => setEmployeeForm({...employeeForm, branch_id: e.target.value})} required><option value="">-- เลือก --</option>{branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div><div className="form-group"><label>👤 ชื่อพนักงาน</label><input type="text" value={employeeForm.name} onChange={e => setEmployeeForm({...employeeForm, name: e.target.value})} placeholder="ชื่อ-นามสกุล" required /></div><button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '➕ เพิ่มพนักงาน'}</button></form>)}
-        {employees.length > 0 && !editingEmployee && (<div className="data-list"><h4>📋 พนักงาน ({employees.length} คน)</h4>{employees.map(emp => (<div key={emp.id} className="data-item"><span><strong>{emp.name}</strong> <small>({emp.branch_name})</small></span><div className="item-actions"><button className="edit-btn" onClick={() => setEditingEmployee({...emp})}>✏️</button><button className="delete-btn" onClick={() => handleDeleteEmployee(emp.id, emp.name)}>🗑️</button></div></div>))}</div>)}</div>)}
+                  {/* Section: ค่าใช้จ่าย */}
+                  <div className="form-section">
+                    <div className="section-header expenses">
+                      <span>📉 ค่าใช้จ่าย</span>
+                      <span className="section-total">รวม: ฿{formatCurrency(totalExpenses)}</span>
+                    </div>
+                    <div className="form-row-3">
+                      <div className="form-group">
+                        <label style={{color: '#ef4444'}}>📦 ต้นทุน</label>
+                        <input type="number" min="0" value={formData.expense_cost} onChange={e => setFormData({...formData, expense_cost: e.target.value})} placeholder="0" />
+                      </div>
+                      <div className="form-group">
+                        <label style={{color: '#f59e0b'}}>📢 ค่าโฆษณา</label>
+                        <input type="number" min="0" value={formData.expense_ads} onChange={e => setFormData({...formData, expense_ads: e.target.value})} placeholder="0" />
+                      </div>
+                      <div className="form-group">
+                        <label style={{color: '#8b5cf6'}}>💳 ค่าธรรมเนียม</label>
+                        <input type="number" min="0" value={formData.expense_fees} onChange={e => setFormData({...formData, expense_fees: e.target.value})} placeholder="0" />
+                      </div>
+                    </div>
+                  </div>
 
-      {activeForm === 'branch' && (<div className="entry-form"><h3>🏢 จัดการสาขา</h3>
-        {editingBranch ? (<form onSubmit={handleUpdateBranch} className="edit-modal"><h4>✏️ แก้ไขสาขา</h4><div className="form-group"><label>🏷️ ชื่อสาขา</label><input type="text" value={editingBranch.name} onChange={e => setEditingBranch({...editingBranch, name: e.target.value})} required /></div><div className="form-group"><label>🎨 สี</label><input type="color" value={editingBranch.color || '#3b82f6'} onChange={e => setEditingBranch({...editingBranch, color: e.target.value})} /></div><div className="btn-row"><button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '💾 บันทึก'}</button><button type="button" className="cancel-btn" onClick={() => setEditingBranch(null)}>❌ ยกเลิก</button></div></form>)
-        : (<form onSubmit={handleAddBranch}><div className="form-group"><label>🏷️ ชื่อสาขา</label><input type="text" value={branchForm.name} onChange={e => setBranchForm({...branchForm, name: e.target.value})} placeholder="เช่น สาขาสีลม" required /></div><div className="form-group"><label>🎨 สี</label><input type="color" value={branchForm.color} onChange={e => setBranchForm({...branchForm, color: e.target.value})} /></div><button type="submit" className="submit-btn" disabled={loading}>{loading ? '⏳...' : '➕ เพิ่มสาขา'}</button></form>)}
-        {branches.length > 0 && !editingBranch && (<div className="data-list"><h4>📋 สาขา ({branches.length})</h4>{branches.map(b => (<div key={b.id} className="data-item"><span style={{display:'flex',alignItems:'center',gap:'8px'}}><span style={{width:'12px',height:'12px',borderRadius:'3px',background:b.color}}></span><strong>{b.name}</strong></span><div className="item-actions"><button className="edit-btn" onClick={() => setEditingBranch({...b})}>✏️</button><button className="delete-btn" onClick={() => handleDeleteBranch(b.id, b.name)}>🗑️</button></div></div>))}</div>)}</div>)}
+                  {/* Summary */}
+                  <div className="form-summary">
+                    <div className="summary-item">
+                      <span>🎯 เป้าหมาย</span>
+                      <strong>฿{formatCurrency(totalTarget)}</strong>
+                    </div>
+                    <div className="summary-item">
+                      <span>💰 ยอดขาย</span>
+                      <strong style={{color: '#3b82f6'}}>฿{formatCurrency(totalSales)}</strong>
+                    </div>
+                    <div className="summary-item">
+                      <span>📊 ผลงาน</span>
+                      <strong style={{color: getPerformanceColor(performancePct)}}>{performancePct}%</strong>
+                    </div>
+                    <div className="summary-item">
+                      <span>📉 ค่าใช้จ่าย</span>
+                      <strong style={{color: '#f59e0b'}}>฿{formatCurrency(totalExpenses)}</strong>
+                    </div>
+                    <div className="summary-item">
+                      <span>✨ กำไรสุทธิ</span>
+                      <strong style={{color: netProfit >= 0 ? '#10b981' : '#ef4444'}}>฿{formatCurrency(netProfit)}</strong>
+                    </div>
+                  </div>
+
+                  <button type="submit" className="submit-btn-large" disabled={loading}>
+                    {loading ? '⏳ กำลังบันทึก...' : '💾 บันทึกข้อมูลทั้งหมด'}
+                  </button>
+                </>
+              )}
+            </form>
+          )}
+        </div>
+      )}
+
+      {/* ========== จัดการสาขา/พนักงาน ========== */}
+      {activeForm === 'manage' && (
+        <div className="manage-section">
+          {/* สาขา */}
+          <div className="manage-card">
+            <h4>🏢 จัดการสาขา</h4>
+            {editingBranch ? (
+              <form onSubmit={handleUpdateBranch} className="inline-form">
+                <input type="text" value={editingBranch.name} onChange={e => setEditingBranch({...editingBranch, name: e.target.value})} required />
+                <input type="color" value={editingBranch.color || '#3b82f6'} onChange={e => setEditingBranch({...editingBranch, color: e.target.value})} />
+                <button type="submit" className="btn-save" disabled={loading}>💾</button>
+                <button type="button" className="btn-cancel" onClick={() => setEditingBranch(null)}>❌</button>
+              </form>
+            ) : (
+              <form onSubmit={handleAddBranch} className="inline-form">
+                <input type="text" value={branchForm.name} onChange={e => setBranchForm({...branchForm, name: e.target.value})} placeholder="ชื่อสาขา" required />
+                <input type="color" value={branchForm.color} onChange={e => setBranchForm({...branchForm, color: e.target.value})} />
+                <button type="submit" className="btn-add" disabled={loading}>➕</button>
+              </form>
+            )}
+            <div className="item-list">
+              {branches.map(b => (
+                <div key={b.id} className="item-row">
+                  <span style={{display:'flex',alignItems:'center',gap:'8px'}}><span style={{width:'12px',height:'12px',borderRadius:'3px',background:b.color}}></span>{b.name}</span>
+                  <div className="item-actions">
+                    <button className="btn-edit" onClick={() => setEditingBranch({...b})}>✏️</button>
+                    <button className="btn-delete" onClick={() => handleDeleteBranch(b.id, b.name)}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* พนักงาน */}
+          <div className="manage-card">
+            <h4>👤 จัดการพนักงาน</h4>
+            {editingEmployee ? (
+              <form onSubmit={handleUpdateEmployee} className="inline-form">
+                <input type="text" value={editingEmployee.name} onChange={e => setEditingEmployee({...editingEmployee, name: e.target.value})} required />
+                <button type="submit" className="btn-save" disabled={loading}>💾</button>
+                <button type="button" className="btn-cancel" onClick={() => setEditingEmployee(null)}>❌</button>
+              </form>
+            ) : branches.length === 0 ? (
+              <p style={{color:'#64748b',fontSize:'13px'}}>⚠️ กรุณาเพิ่มสาขาก่อน</p>
+            ) : (
+              <form onSubmit={handleAddEmployee} className="inline-form">
+                <select value={employeeForm.branch_id} onChange={e => setEmployeeForm({...employeeForm, branch_id: e.target.value})} required>
+                  <option value="">เลือกสาขา</option>
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <input type="text" value={employeeForm.name} onChange={e => setEmployeeForm({...employeeForm, name: e.target.value})} placeholder="ชื่อพนักงาน" required />
+                <button type="submit" className="btn-add" disabled={loading}>➕</button>
+              </form>
+            )}
+            <div className="item-list">
+              {employees.map(emp => (
+                <div key={emp.id} className="item-row">
+                  <span>{emp.name} <small style={{color:'#64748b'}}>({emp.branch_name})</small></span>
+                  <div className="item-actions">
+                    <button className="btn-edit" onClick={() => setEditingEmployee({...emp})}>✏️</button>
+                    <button className="btn-delete" onClick={() => handleDeleteEmployee(emp.id, emp.name)}>🗑️</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -255,12 +530,29 @@ const styles = `
 .emp-section{background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.1);border-radius:14px;padding:18px;margin-top:20px;animation:slideUp .3s ease}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}.emp-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}.emp-header h3{font-family:'Kanit',sans-serif;font-size:16px;font-weight:500}.close-btn{width:28px;height:28px;border:none;background:rgba(148,163,184,.1);color:#94a3b8;border-radius:6px;cursor:pointer;font-size:16px}.close-btn:hover{background:rgba(239,68,68,.2);color:#f87171}.emp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.emp-card{background:rgba(15,23,42,.5);border-radius:10px;padding:14px}.emp-card-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}.emp-avatar{width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:white}.emp-name{font-weight:500;font-size:13px}.emp-rank{font-size:10px;color:#64748b}.rank-badge{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;margin-left:auto}.rank-1{background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#1e293b}.rank-2{background:linear-gradient(135deg,#94a3b8,#64748b);color:#1e293b}.rank-3{background:linear-gradient(135deg,#a78bfa,#7c3aed);color:white}.rank-n{background:rgba(148,163,184,.2);color:#94a3b8}
 .emp-performance{margin-bottom:10px}.perf-bar{height:6px;background:rgba(148,163,184,.2);border-radius:3px;overflow:hidden;margin-bottom:4px}.perf-fill{height:100%;border-radius:3px}.perf-info{display:flex;justify-content:space-between;font-size:11px}
 .emp-summary{display:flex;justify-content:space-between;padding-top:10px;border-top:1px solid rgba(148,163,184,.1);font-size:11px}.emp-summary div{text-align:center}.emp-summary span{display:block;color:#64748b;font-size:9px}.emp-summary strong{font-family:'Kanit',sans-serif}
-.data-entry{max-width:600px;margin:0 auto}.entry-tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}.entry-tab{padding:10px 16px;background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.2);border-radius:8px;color:#94a3b8;font-size:13px;cursor:pointer;transition:all .2s}.entry-tab:hover{background:rgba(59,130,246,.1)}.entry-tab.active{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;border-color:transparent}.entry-form{background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.1);border-radius:14px;padding:24px;margin-bottom:20px}.entry-form h3{font-family:'Kanit',sans-serif;font-size:18px;margin-bottom:20px}.message{padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;text-align:center}.message.success{background:rgba(16,185,129,.1);color:#34d399;border:1px solid rgba(16,185,129,.3)}.message.error{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.3)}
-.data-list{margin-top:24px;padding-top:20px;border-top:1px solid rgba(148,163,184,.1)}.data-list h4{font-family:'Kanit',sans-serif;font-size:14px;margin-bottom:12px;color:#94a3b8}.data-item{display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(15,23,42,.5);border-radius:8px;margin-bottom:8px;font-size:13px;flex-wrap:wrap;gap:8px}.data-item small{color:#64748b}
-.item-actions{display:flex;gap:6px}
-.edit-btn{padding:6px 10px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:6px;color:#60a5fa;font-size:12px;cursor:pointer}.edit-btn:hover{background:rgba(59,130,246,.2)}
-.delete-btn{padding:6px 10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:6px;color:#f87171;font-size:12px;cursor:pointer}.delete-btn:hover{background:rgba(239,68,68,.2)}
-.edit-modal{background:rgba(15,23,42,.8);border:1px solid rgba(59,130,246,.3);border-radius:12px;padding:20px;margin-bottom:20px}.edit-modal h4{font-family:'Kanit',sans-serif;font-size:16px;margin-bottom:16px;color:#60a5fa}
-.btn-row{display:flex;gap:12px}.btn-row .submit-btn{flex:1}.cancel-btn{flex:1;padding:14px;background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.3);border-radius:10px;color:#94a3b8;font-family:'Sarabun',sans-serif;font-size:15px;cursor:pointer}.cancel-btn:hover{background:rgba(148,163,184,.2)}
-.target-sum{text-align:center;padding:12px;background:rgba(59,130,246,.1);border-radius:8px;margin-bottom:16px;color:#60a5fa;font-family:'Kanit',sans-serif}
+
+/* ========== COMBINED DATA ENTRY STYLES ========== */
+.data-entry-combined{max-width:700px;margin:0 auto}
+.entry-tabs{display:flex;gap:8px;margin-bottom:20px}.entry-tab{padding:12px 20px;background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.2);border-radius:10px;color:#94a3b8;font-size:14px;cursor:pointer;transition:all .2s}.entry-tab:hover{background:rgba(59,130,246,.1)}.entry-tab.active{background:linear-gradient(135deg,#3b82f6,#6366f1);color:white;border-color:transparent}
+.message{padding:12px;border-radius:8px;margin-bottom:16px;font-size:14px;text-align:center}.message.success{background:rgba(16,185,129,.1);color:#34d399;border:1px solid rgba(16,185,129,.3)}.message.error{background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.3)}
+
+.combined-form{background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.1);border-radius:16px;padding:24px}
+.form-header{margin-bottom:24px}.form-header h3{font-family:'Kanit',sans-serif;font-size:20px;margin-bottom:8px}.form-header p{color:#64748b;font-size:13px}
+.employee-selector{margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid rgba(148,163,184,.1)}.employee-selector label{display:block;font-size:14px;color:#94a3b8;margin-bottom:10px}.employee-selector select{width:100%;padding:16px;background:rgba(15,23,42,.8);border:2px solid rgba(59,130,246,.3);border-radius:12px;color:white;font-size:16px;cursor:pointer}.employee-selector select:focus{outline:none;border-color:#3b82f6}
+.form-section{margin-bottom:20px;padding:16px;background:rgba(15,23,42,.4);border-radius:12px}
+.section-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(148,163,184,.1);font-size:14px;font-weight:500}.section-header.target{color:#10b981}.section-header.sales{color:#3b82f6}.section-header.expenses{color:#f59e0b}.section-total{font-family:'Kanit',sans-serif;font-size:15px}
+.form-row-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}@media(max-width:600px){.form-row-3{grid-template-columns:1fr}}
+.form-row-3 .form-group{margin-bottom:0}.form-row-3 .form-group label{font-size:12px;margin-bottom:6px}.form-row-3 .form-group input{padding:12px;font-size:14px}
+.form-summary{display:flex;flex-wrap:wrap;gap:12px;margin:20px 0;padding:16px;background:rgba(15,23,42,.6);border-radius:12px}.summary-item{flex:1;min-width:100px;text-align:center;padding:10px;background:rgba(30,41,59,.5);border-radius:8px}.summary-item span{display:block;font-size:11px;color:#64748b;margin-bottom:4px}.summary-item strong{font-family:'Kanit',sans-serif;font-size:14px}
+.submit-btn-large{width:100%;padding:18px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:12px;color:white;font-family:'Kanit',sans-serif;font-size:18px;font-weight:500;cursor:pointer;transition:all .2s}.submit-btn-large:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 4px 12px rgba(16,185,129,.3)}.submit-btn-large:disabled{opacity:.7;cursor:not-allowed}
+.link-btn{padding:10px 20px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:8px;color:#60a5fa;font-size:13px;cursor:pointer;margin-top:10px}
+
+/* Manage Section */
+.manage-section{display:grid;gap:20px}
+.manage-card{background:rgba(30,41,59,.6);border:1px solid rgba(148,163,184,.1);border-radius:14px;padding:20px}.manage-card h4{font-family:'Kanit',sans-serif;font-size:16px;margin-bottom:16px}
+.inline-form{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}.inline-form input,.inline-form select{padding:10px 14px;background:rgba(15,23,42,.8);border:1px solid rgba(148,163,184,.2);border-radius:8px;color:white;font-size:14px;flex:1;min-width:120px}.inline-form input[type="color"]{width:50px;padding:5px;flex:none}
+.btn-add,.btn-save{padding:10px 16px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:8px;color:white;font-size:14px;cursor:pointer}.btn-cancel{padding:10px 16px;background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.3);border-radius:8px;color:#94a3b8;font-size:14px;cursor:pointer}
+.item-list{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto}
+.item-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(15,23,42,.5);border-radius:8px;font-size:13px}
+.item-actions{display:flex;gap:6px}.btn-edit,.btn-delete{padding:6px 10px;border:none;border-radius:6px;font-size:12px;cursor:pointer}.btn-edit{background:rgba(59,130,246,.1);color:#60a5fa}.btn-delete{background:rgba(239,68,68,.1);color:#f87171}
 `;
