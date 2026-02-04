@@ -554,5 +554,72 @@ const styles = `
 .btn-add,.btn-save{padding:10px 16px;background:linear-gradient(135deg,#10b981,#059669);border:none;border-radius:8px;color:white;font-size:14px;cursor:pointer}.btn-cancel{padding:10px 16px;background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.3);border-radius:8px;color:#94a3b8;font-size:14px;cursor:pointer}
 .item-list{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto}
 .item-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:rgba(15,23,42,.5);border-radius:8px;font-size:13px}
-.item-actions{display:flex;gap:6px}.btn-edit,.btn-delete{padding:6px 10px;border:none;border-radius:6px;font-size:12px;cursor:pointer}.btn-edit{background:rgba(59,130,246,.1);color:#60a5fa}.btn-delete{background:rgba(239,68,68,.1);color:#f87171}
+.item-actions{display:flex;gap:6px}.btn-edit,.btn-delete{padding:6px 10px;border:none;border-radius:6px;font-size:12px;cursor:pointer;transition:all .2s}.btn-edit{background:rgba(59,130,246,.1);color:#60a5fa}.btn-edit:hover{background:rgba(59,130,246,.2);transform:scale(1.05)}.btn-delete{background:rgba(239,68,68,.1);color:#f87171}.btn-delete:hover{background:rgba(239,68,68,.2);transform:scale(1.05)}
+
+/* ========== ANIMATIONS ========== */
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideDown{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes scaleIn{from{opacity:0;transform:scale(0.9)}to{opacity:1;transform:scale(1)}}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+@keyframes shake{0%,100%{transform:translateX(0)}25%,75%{transform:translateX(-5px)}50%{transform:translateX(5px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes gradient{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+@keyframes glow{0%,100%{box-shadow:0 0 5px rgba(59,130,246,0.3)}50%{box-shadow:0 0 25px rgba(59,130,246,0.6)}}
+@keyframes particleFloat{0%{transform:translateY(100vh);opacity:0}10%{opacity:0.3}90%{opacity:0.3}100%{transform:translateY(-100vh);opacity:0}}
+@keyframes progressFill{from{width:0}}
+
+/* Animation Classes */
+.animate-fade-in{animation:fadeIn 0.5s ease forwards}
+.animate-slide-down{animation:slideDown 0.5s ease forwards}
+.animate-slide-up{animation:slideUp 0.5s ease forwards}
+.animate-scale-in{animation:scaleIn 0.5s ease forwards;animation-delay:var(--delay,0s)}
+.animate-float{animation:float 3s ease-in-out infinite}
+.bounce{animation:bounce 2s ease infinite}
+.pulse{animation:pulse 2s ease infinite}
+.shake{animation:shake 0.5s ease}
+
+/* Gradient Text */
+.gradient-text{background:linear-gradient(135deg,#3b82f6,#8b5cf6,#ec4899);background-size:200% 200%;-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;animation:gradient 3s ease infinite}
+
+/* Loading Spinner */
+.loading-spinner{display:inline-block;width:20px;height:20px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.8s linear infinite}
+.loading-spinner.small{width:14px;height:14px}
+
+/* Card Hover Effects */
+.summary-card,.branch-card,.emp-card,.expense-card,.chart-section{transition:all 0.3s ease}
+.summary-card:hover,.branch-card:hover,.emp-card:hover,.expense-card:hover{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,0.3)}
+
+/* Progress Animation */
+.progress-fill{transition:width 1s cubic-bezier(0.4,0,0.2,1)}
+
+/* Background Particles */
+.bg-particles{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:0}
+.particle{position:absolute;width:4px;height:4px;background:rgba(59,130,246,0.2);border-radius:50%;animation:particleFloat linear infinite}
+
+/* Login Shapes */
+.login-bg-shapes{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.shape{position:absolute;border-radius:50%;background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(139,92,246,0.1))}
+.shape-1{width:400px;height:400px;top:-100px;right:-100px;animation:float 6s ease-in-out infinite}
+.shape-2{width:300px;height:300px;bottom:-50px;left:-50px;animation:float 8s ease-in-out infinite reverse}
+.shape-3{width:200px;height:200px;top:50%;left:50%;transform:translate(-50%,-50%);animation:pulse 4s ease-in-out infinite}
+
+/* Enhanced UI */
+.logo-icon{box-shadow:0 4px 20px rgba(59,130,246,0.4);transition:all 0.3s}
+.logo-icon:hover{transform:scale(1.05)}
+.tab{transition:all 0.3s}
+.tab.active{box-shadow:0 4px 15px rgba(59,130,246,0.4)}
+.status.success{box-shadow:0 0 10px rgba(16,185,129,0.3)}
+.status.danger{box-shadow:0 0 10px rgba(239,68,68,0.3)}
+.rank-1{box-shadow:0 0 15px rgba(251,191,36,0.5)}
+.form-section{transition:all 0.3s;border-left:4px solid transparent}
+.section-target{border-left-color:#10b981}
+.section-sales{border-left-color:#3b82f6}
+.section-expenses{border-left-color:#f59e0b}
+.form-section:hover{background:rgba(15,23,42,0.6)}
+.channel-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.save-success{animation:glow 0.5s ease}
+.input-glow:focus{box-shadow:0 0 0 3px rgba(59,130,246,0.3)}
 `;
